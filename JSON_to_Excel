@@ -1,0 +1,112 @@
+import json
+import os
+import csv
+from pathlib import Path
+import requests
+
+output_path = r"C:\Users\Alan\Documents\fun\OurCraft Stats" #folder to output stats.csv and avatar images
+input_world = "DookyCraft" #looks in .minecraft folder
+
+
+def flatten_json(y):
+    #taken from:
+    #https: // towardsdatascience.com / flattening - json - objects - in -python - f5343c794b10
+    out = {}
+
+    def flatten(x, name=''):
+        if type(x) is dict:
+            for a in x:
+                flatten(x[a], name + a + '_')
+        elif type(x) is list:
+            i = 0
+            for a in x:
+                flatten(a, name + str(i) + '_')
+                i += 1
+        else:
+            out[name[:-1]] = x
+
+    flatten(y)
+    return out
+
+
+def get_username(uuid):
+    #get player username based on UUID
+    #https://www.digitalocean.com/community/tutorials/how-to-use-web-apis-in-python-3
+    playerdb_url = "https://playerdb.co/api/player/minecraft/"
+    #print(playerdb_url + uuid)
+    response = requests.get(playerdb_url + uuid)
+    if response.status_code == 200:
+        playerdb_return = json.loads(response.content.decode("utf-8"))
+        return playerdb_return["data"]["player"]["username"]
+    else:
+        return "PlayerDB Issue"
+
+
+def get_avatar(uuid, username, output_directory):
+    #get body render based on UUID
+    crafatar_url = "https://crafatar.com/renders/body/"
+    response = requests.get(crafatar_url + uuid)
+    if response.status_code == 200:
+        crafatar_return = response.content
+        with open(os.path.join(output_directory, username) + ".png", "wb") as f:
+            f.write(crafatar_return)
+        return 0
+    else:
+        return "Crafatar Issue"
+
+
+def generate_stats_spreadsheet(my_world, output_directory):
+    #define world to look for player stats in
+    my_path = os.environ.get("APPDATA") + r"\.minecraft\saves"
+    directory = os.path.join(my_path, my_world, "stats")
+    username_header = ["Tags"]
+    all_dicts = []
+    all_tags = []
+
+    #look for JSON files in directory, flatten, and store dictionary of values
+    for entry in os.scandir(directory):
+        if entry.path.endswith(".json") and entry.is_file():
+            uuid = Path(entry).stem
+            username = get_username(uuid)
+            get_avatar(uuid, username, output_directory)
+            username_header.append(username)
+            #print("UUID: " + uuid)
+            #print("Username: " + username)
+            f = open(entry.path)
+            g = json.load(f)
+            h = flatten_json(g)
+            all_dicts.append(h)
+
+    #get sorted list of all tags
+    for k in all_dicts:
+        for key in k:
+            if key not in all_tags and k != 0:
+                all_tags.append(key)
+    all_tags.sort()
+
+    #initialize array
+    w = len(all_tags)
+    h = len(username_header)
+    all_values = [[0 for x in range(w)] for y in range(h)]
+
+    #create per-username lists of tags and values, with assigned default 0
+    all_values[0] = all_tags
+    i = 0
+    for k in all_dicts:
+        current_values = []
+        i += 1
+        for p in all_tags:
+            if p in k:
+                current_values.append(k[p])
+            else:
+                current_values.append(0)
+        all_values[i] = current_values
+
+    with open(os.path.join(output_directory, "stats.csv"), "w", encoding='UTF8', newline='') as output:
+        all_values = list(map(list, zip(*all_values))) #transpose list
+        writer = csv.writer(output)
+        writer.writerow(username_header)
+        writer.writerows(all_values)
+
+
+generate_stats_spreadsheet(input_world, output_path)
